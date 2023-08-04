@@ -1,5 +1,6 @@
 # Coil Class:
 # 1/4/2023
+# updated: 06/27/2023
 # - References -
 ## Minard and Wind papers part I and II
 ## https://doi.org/10.1002/1099-0534(2001)13:2<128::AID-CMR1002>3.0.CO;2-8
@@ -36,7 +37,7 @@ class Coil:
     def Bxy(self):
         return self.n*self.u0 / (self.dcoil*sqrt(1+(self.lcoil/self.dcoil)**2))
     
-    def Rcoil(self):
+    def Rcoil(self): # solenoid
         # this changes with lcoil/dcoil
         # pick a value from the table for now
         # number of turns times the circumference...
@@ -44,7 +45,11 @@ class Coil:
         rs = ((l/self.dwire)*sqrt(self.ur*self.u0*self.rho*self.f/pi))
         return rs*self.getEnhancementFactor()
           
-
+    def Rloop(self): # surface loop see: https://doi.org/10.1016/j.biochi.2003.09.016 equation 9
+        rs = ((2*self.dcoil*self.n**2)/self.dwire) * sqrt(self.rho*self.u0*pi*self.f)
+        return rs*self.getEnhancementFactor()
+        
+        
     def Rleads(self):
         l = .005 # length of the leads 5mm
         d = self.dwire
@@ -52,7 +57,7 @@ class Coil:
 
     def Rcap(self):
         #Q = 5.05*1e9*self.f**-2.35
-        Q = 1000
+        Q = 2000
         # calculate inductance
         # technically the leads also contribute inductance but i am ignoring it
         # correctors
@@ -63,7 +68,7 @@ class Coil:
 
     def Lcoil(self):
         J = 2.33*log10(self.dwire/self.s) + .515
-        K_v = [.01,.07,.15,.18,.21,.24,.25,.27,.28,.29,.3]
+        K_v = [.01,.07,.15,.18,.21,.24,.25,.27,.28,.29,.3] 
         if (self.n > 11):
             K = .3
         else:
@@ -123,16 +128,35 @@ class Coil:
         Re = Yreal * Lcoil**2 * w**2 # equation 19
 
         return Re 
-        #return 60*self.RsampleMagnetic()
+        
 
-
+    def RsampleDielectricSimple(self): # simpler(?)
+        # only needs 4 params:
+        w = 2*pi*self.f
+        Lcoil = self.Lcoil()
+        # validate my simplification worked:
+        fd = .948
+        H = .1126*self.lcoil/self.dcoil + .08 + (.27/((self.lcoil/self.dcoil)**.5))
+        Cstray = 100*H*self.dcoil* 1e-12 # change to Farads
+        #print('Cstray = {}'.format(Cstray))
+        Cprime = .5*Cstray
+        # dielectric permittivity (complex and real components)
+        enot = 8.85e-12 # F/m
+        e0 = 78.32
+        einf = 5.30
+        tau = 8.27e-12
+        epsPrime = einf + (e0 - einf)/(1+(w*tau)**2)
+        epsDoublePrime = ((e0-einf)*w*tau)/(1+(w*tau)**2) + self.sigma/(w*enot)
+        Re = (w**3 * Lcoil**2 * fd * Cprime *epsDoublePrime)/((epsDoublePrime**2 * (1-fd)**2) + fd**2*(epsPrime-1)**2 + epsPrime**2*(1-2*fd) + 2*epsPrime*fd )
+        return Re
 
     def Rnmr(self):
         #return (self.Rcoil() + self.Rcap() + self.Rleads() + self.RsampleMagnetic())
         return (self.Rcoil() + self.RsampleMagnetic() + self.RsampleDielectric() + self.Rcap() + self.Rleads())
+    
     def RnmrTemp(self):
         #return (self.Rcoil() + self.Rcap() + self.Rleads() + self.RsampleMagnetic())
-        return ((self.Rcoil() + self.Rcap() + self.Rleads())*self.tc + (self.RsampleMagnetic() + self.RsampleDielectric())*self.ts)
+        return ((self.Rcoil() + 2*self.Rcap() + self.Rleads())*self.tc + (self.RsampleMagnetic() + self.RsampleDielectric())*self.ts)
     
     def getEnhancementFactor(self):
         dos = self.dwire/(self.s)
@@ -165,6 +189,13 @@ class Coil:
     
     def getSNR(self):
         return (self.Bxy()*(2*pi*self.f)**2)/sqrt(self.RnmrTemp())
+    
+    def getSNR_cooledCircuitOnly_loop(self,tloop,tcircuit,tsample):
+        return (self.Bxy()*(2*pi*self.f)**2)/sqrt(self.Rloop()*tloop + (2*self.Rcap() + self.Rleads())*tcircuit + (self.RsampleMagnetic() + self.RsampleDielectric())*tsample)
+    
+    def getSNR_cooledCircuitOnly_solenoid(self,tloop,tcircuit,tsample):
+        return (self.Bxy()*(2*pi*self.f)**2)/sqrt(self.Rcoil()*tloop + (2*self.Rcap() + self.Rleads())*tcircuit + (self.RsampleMagnetic() + self.RsampleDielectric())*tsample)
+    
     
     def displayResistance(self):
         # Rcoil, Rleads, Rcap, RsampleMagnetic, RsampleDielectric
